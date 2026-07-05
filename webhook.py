@@ -1,55 +1,86 @@
 from flask import Flask, request
-import json
+import traceback
 
 app = Flask(__name__)
 
 
 @app.route("/")
 def home():
-    return "Webhook is running", 200
+    return "Webhook is running!", 200
 
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.json
 
-    print("\n==============================")
-    print("📡 RAW HELIUS EVENT")
-    print("==============================")
+    try:
+        # Get JSON sent by Helius
+        data = request.get_json(force=True)
 
-    print(json.dumps(data, indent=2))
+        # Helius sends a list of transactions
+        if not isinstance(data, list):
+            data = [data]
 
-    # -----------------------------
-    # STEP 1: SAFE EXTRACTION
-    # -----------------------------
-    event_type = data.get("type", "UNKNOWN")
+        print("\n====================================================")
+        print(f"📡 Received {len(data)} transaction(s)")
+        print("====================================================")
 
-    print("\n🔍 EVENT TYPE:", event_type)
+        for tx in data:
 
-    # -----------------------------
-    # STEP 2: DETECT SWAP
-    # -----------------------------
-    swap_event = None
+            tx_type = tx.get("type", "UNKNOWN")
+            source = tx.get("source", "UNKNOWN")
+            signature = tx.get("signature", "")
 
-    if "events" in data and data["events"]:
-        swap_event = data["events"].get("swap")
+            print("\n----------------------------------------------------")
+            print("Transaction Type :", tx_type)
+            print("Source           :", source)
+            print("Signature        :", signature)
 
-    if swap_event:
-        print("\n🔁 SWAP DETECTED!")
+            if tx_type != "SWAP":
+                print("⏩ Not a swap. Ignoring.")
+                continue
 
-        # Try extracting key info safely
-        token_in = swap_event.get("tokenInputs", [{}])[0].get("mint", "UNKNOWN")
-        token_out = swap_event.get("tokenOutputs", [{}])[0].get("mint", "UNKNOWN")
+            print("✅ SWAP DETECTED")
 
-        print("🟢 TOKEN IN:", token_in)
-        print("🔴 TOKEN OUT:", token_out)
+            token_transfers = tx.get("tokenTransfers", [])
 
-        print("\n🚨 SIGNAL: TRADE DETECTED (POTENTIAL BUY/SELL)")
-    else:
-        print("\n⚪ No swap detected → ignoring")
+            if len(token_transfers) == 0:
+                print("No token transfers found.")
+                continue
 
-    return "OK", 200
+            print(f"\nFound {len(token_transfers)} token transfers:\n")
+
+            for transfer in token_transfers:
+
+                mint = transfer.get("mint", "")
+                amount = transfer.get("tokenAmount", 0)
+                sender = transfer.get("fromUserAccount", "")
+                receiver = transfer.get("toUserAccount", "")
+
+                print("----------------------------------------")
+                print("Mint   :", mint)
+                print("Amount :", amount)
+                print("From   :", sender)
+                print("To     :", receiver)
+
+                # Ignore wrapped SOL
+                if mint == "So11111111111111111111111111111111111111112":
+                    print("Type   : Wrapped SOL")
+                else:
+                    print("Type   : TOKEN")
+                    print("🎯 POSSIBLE TOKEN FOR COPY TRADING")
+
+        print("\n✅ Webhook processed successfully.\n")
+
+        return "OK", 200
+
+    except Exception:
+
+        print("\n❌ ERROR INSIDE WEBHOOK")
+        traceback.print_exc()
+
+        return "ERROR", 500
 
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+    
